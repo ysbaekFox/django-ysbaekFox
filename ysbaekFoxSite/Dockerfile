@@ -4,5 +4,5 @@ RUN pip3 install django
 RUN pip3 install gunicorn
 COPY . /usr/src/app/django
 WORKDIR /usr/src/app/django
-CMD ["gunicorn", "--bind", "8000:8000", "ysbaekFoxSite.wsgi:application"]
+CMD ["gunicorn", "--bind", "0:8000", "ysbaekFoxSite.wsgi:application"]
 EXPOSE 8000

@@ -4,7 +4,8 @@ metadata:
   name: django-service-nodeport
 spec:
   selector:
-    app: django-admin
+    app: django-server
   ports:
     - port: 80
+      targetPort: 8000
   type: NodePort
