@@ -98,7 +98,7 @@ LOGGING = {
         'file': {
             'level': 'ERROR',
             'class': 'logging.FileHandler',
-            'filename': BASE_DIR / 'log.txt' ,
+            'filename': '/var/log/log.txt' ,
             'formatter': 'verbose'
         },
     },
