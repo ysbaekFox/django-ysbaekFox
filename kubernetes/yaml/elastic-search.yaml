@@ -1,0 +1,116 @@
+# 네임 스페이스 정의
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-logging
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: elasticsearch
+  namespace: kube-logging
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - port: 9200
+      name: rest
+    - port: 9300
+      name: inter-node
+---
+apiVersion: apps/v1
+kind: StatefulSet 
+# StatefulSet 컨트롤러
+# Pod 이름에 대한 규칙성 부여
+# 배포시 순차적인 기동과 업데이트 가능
+# 개별 Pod에 대한 디스크 볼륨 관리
+metadata: # object를 유일하게 구분지어줄 데이터
+  name: es-cluster
+  namespace: kube-logging
+spec: # object에 대해 어떤 상태를 의도하는지 정의
+  serviceName: elasticsearch # pod가 생성될 때, dns 서브도메인 정의에 사용됨.
+  replicas: 3 # 생성할 pod 수
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+        - name: elasticsearch
+          image: elasticsearch:7.12.1
+          resources:
+            limits: # 최대 자원 제한
+              cpu: 1000m # 베어메탈 인텔 프로세서에서의 1개 하이퍼스레드
+            requests: # 최소 자원 보장, 중요한 Pod는 최소 이정도는 보장해야한다라고 명시하는 것
+              cpu: 100m # 0.1 == 100m
+          ports:
+            - containerPort: 9200 # fluentd -> elastic search로 보내는 port
+              name: rest
+              protocol: TCP
+            - containerPort: 9300 # ??? 뭐하는 포트인지 잘모르겠다.
+              name: inter-node
+              protocol: TCP
+          volumeMounts: # data 볼륨을 생성하고
+                        # 볼륨을 마운트할 위치를 선언 
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+          env: # 환경 변수 설정
+            - name: cluster.name # cluster.name 환경 변수를 
+              value: k8s-logs    # k8s-logs로 정의
+                                 # $(k8s-logs) 이런식으로 사용 가능
+            - name: node.name # node.name 환경 변수를
+              valueFrom:      # 파드의 metadata.name 필드에서 가져와 정의하도록 구성.
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: discovery.seed_hosts 
+              value: "es-cluster-0.elasticsearch,es-cluster-1.elasticsearch,es-cluster-2.elasticsearch"
+            - name: cluster.initial_master_nodes # StatefulSet으로 구성하면 {이름}-{순차적인 숫자}로 노드 이름 생성 됨.
+              value: "es-cluster-0,es-cluster-1,es-cluster-2"
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+              # 환경 변수 딱히 쓸 일은 없는 것 같음.
+      initContainers: # 초기화 컨테이너
+                      # 초기화 컨테이너는 항상 완료를 목표로 실행됨
+                      # 즉 아래 예제에서는 pod를 실행하기전에 busybox를 사용해서 아래 환경 설정을 순차적으로 미리 하는 것이 목표 
+        - name: fix-permissions
+          image: busybox # 하나의 실행 파일 안에 스트립 다운된 일부 유닉스 도구들을 제공하는 소프트웨어이다
+                         # 방대한 표준 리눅스 커맨드 라인 유틸리티를 대체할 수 있는 작은 효울적인 툴
+          command: ["sh", "-c", "chown -R 1000:1000 /usr/share/elasticsearch/data"] # /usr/share/elasticsearch/data 디렉토리에 접근할 수 있게 chown 명령어로 소유자 및 그룹을 변경
+          securityContext:
+            privileged: true # true면 커널의 모든 기능에 대한 권한 부여
+                             # capabilities 이용해서 선별적 권한 부여도 가능함
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+        - name: increase-vm-max-map
+          image: busybox
+          command: ["sysctl", "-w", "vm.max_map_count=262144"] # 운영환경에서 Elasticsearch를 문제없이 운영하기 위해 가상 메모리 설정값인 vm.max_map_count의 값을 셋팅
+          securityContext:
+            privileged: true
+        - name: increase-fd-ulimit
+          image: busybox
+          command: ["sh", "-c", "ulimit -n 65536"] # 동시에 매우 많은 파일을 엑세스 하기 때문에 ulimit 명령어를 통해 File Descriptor 설정을 변경
+          securityContext:
+            privileged: true
+  volumeClaimTemplates: # volumeClaimTemplates를 지정하면
+    - metadata:         # 복제된 pod 마다 PVC와 PV가 생성 됨.
+        name: data
+        labels:
+          app: elasticsearch
+      spec:
+        accessModes: [ "ReadWriteOnce" ] # 하나의 노드에서만 Read/Write 권한으로 마운트 될 수 있다.
+                                         # 동일 노드의 파드라면 복수의 파드에서 접근 가능한 권한
+                                         # 만약 전체 클러스터에서 단 하나의 파드만 접근 권한을 주고 싶다면
+                                         # ReadWriteOncePod를 사용
+        storageClassName: standard
+        #storageClassName: gp2 #do-block-storage #gp2 #do-block-storage # storageClassName 속성을 사용해서 PV는 클래스를 가질 수 있다.
+                                                                       # storageClassName 속성을 지정하면 PV는 해당 클래스를 요청하는 PVC에만 바인딩 될 수 있다.
+                                                                       # 만약 storageClassName 속성이 없다면 PV에는 클래스가 없고 특정 클래스를 요청하지 않는 PVC에만 바인딩 될 수 있다.
+        resources:
+          requests:
+            storage: 5Gi
