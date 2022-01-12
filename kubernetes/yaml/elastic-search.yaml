@@ -31,7 +31,7 @@ metadata: # object를 유일하게 구분지어줄 데이터
   namespace: kube-logging
 spec: # object에 대해 어떤 상태를 의도하는지 정의
   serviceName: elasticsearch # pod가 생성될 때, dns 서브도메인 정의에 사용됨.
-  replicas: 1 # 생성할 pod 수
+  replicas: 3 # 생성할 pod 수
   selector:
     matchLabels:
       app: elasticsearch
@@ -42,7 +42,7 @@ spec: # object에 대해 어떤 상태를 의도하는지 정의
     spec:
       containers:
         - name: elasticsearch
-          image: elasticsearch:7.12.1
+          image: docker.elastic.co/elasticsearch/elasticsearch:7.2.0
           resources:
             limits: # 최대 자원 제한
               cpu: 1000m # 베어메탈 인텔 프로세서에서의 1개 하이퍼스레드
@@ -113,4 +113,4 @@ spec: # object에 대해 어떤 상태를 의도하는지 정의
                                                                        # 만약 storageClassName 속성이 없다면 PV에는 클래스가 없고 특정 클래스를 요청하지 않는 PVC에만 바인딩 될 수 있다.
         resources:
           requests:
-            storage: 1Gi
+            storage: 5Gi
