@@ -6,6 +6,59 @@ metadata:
   labels:
     app: fluentd
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fluentd-config
+  namespace: kube-logging
+  labels:
+    k8s-app: fluentd-logging
+    version: v1
+    kubernetes.io/cluster-service: "true"
+data:
+
+  #  logstash_format를 true로 줬기 때문에 logstash_format이 추천 될 것이다.
+  fluent.conf: |
+    #@include systemd.conf
+    @include kubernetes.conf
+    @include kubernetes2.conf
+    <match **>
+       @type elasticsearch
+       @id out_es
+       @log_level info
+       include_tag_key true
+       host elasticsearch-svc.default.svc.cluster.local
+       port 9200
+       scheme "#{ENV['FLUENT_ELASTICSEARCH_SCHEME'] || 'http'}"
+       ssl_verify "#{ENV['FLUENT_ELASTICSEARCH_SSL_VERIFY'] || 'true'}"
+       reload_connections "#{ENV['FLUENT_ELASTICSEARCH_RELOAD_CONNECTIONS'] || 'true'}"
+       logstash_prefix "#{ENV['FLUENT_ELASTICSEARCH_LOGSTASH_PREFIX'] || 'logstash'}"
+       logstash_format true
+       type_name fluentd
+       buffer_chunk_limit 2M
+       buffer_queue_limit 32
+       flush_interval 5s
+       max_retry_wait 30
+       disable_retry_limit 
+       num_threads 8
+    </match>
+  kubernetes.conf: |
+    <match fluent.**>
+      @type null
+    </match>
+    <source>
+      @type tail
+      @id in_tail_container_logs
+      path "/var/log/log.txt"
+      pos_file "/var/log/fluentd-containers.log.pos"
+      tag "kubernetes.*"
+      read_from_head true
+      <parse>
+        @type "regexp"
+        expression .*
+      </parse>    
+    </source>
+---
 apiVersion: rbac.authorization.k8s.io/v1 # RBAC는 enterprise 쿠버네티스 환경에서 node 혹은 네트워크 리소스를 접근할때 role을 부여하는 작업
 kind: ClusterRole # ClusterRole은 Role과 비슷하지만 cluster기반 권한 부여이므로, node, endpoint, 모든 namespace에 대한 권한 셋팅 가능
 metadata:
@@ -80,6 +133,8 @@ spec:
             - name: varlibdockercontainers
               mountPath: /var/lib/docker/containers
               readOnly: true
+            - name: etc-config
+              mountPath: /etc/config
       terminationGracePeriodSeconds: 30
       volumes:
         - name: varlog
@@ -88,3 +143,6 @@ spec:
         - name: varlibdockercontainers
           hostPath:
             path: /var/lib/docker/containers
+        - name: etc-config
+          configMap:
+            name: fluentd-config
